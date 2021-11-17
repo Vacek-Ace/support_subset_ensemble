@@ -15,7 +15,7 @@ from sklearn.model_selection import ParameterGrid
 from sklearn.utils.fixes import _joblib_parallel_args
 
 
-class moe():
+class BoostedSupportSubset():
     def __init__(self, 
                  method=SVC, 
                  params={'C': [1, 10, 100, 1000], 'gamma': [0.0001, 0.001, 0.01, 0.1, 1, 10]}, 
@@ -61,6 +61,41 @@ class moe():
         self.random_state = random_state
         self.learners = None
 
+    def _support_subset_estimation(self, sample, target, clf, prop=1):
+
+        # Ajuste de proporción de puntos en el subconjunto soporte
+        prop = prop + 1
+
+        # Evaluación de distancia al hiperplano
+        decision_function_values = clf.decision_function(sample)
+        
+        # Índices de los vectores soporte
+        alphas_index = clf.support_
+        
+        # Identificación de los vectores soporte
+        pos_support = alphas_index[np.where(decision_function_values[alphas_index] > 0)]
+        neg_support = alphas_index[np.where(decision_function_values[alphas_index] < 0)]
+        decision_function_values[pos_support] = float("inf")
+        decision_function_values[neg_support] = float("-inf")
+        
+        # Conteo de vectores soporte según clase
+        nsv_class = Counter(target[alphas_index])
+        
+        # Tamaño muestra de los sunconjuntos positivo y negativo
+        samp_prop = [np.max([nsv_class[i] + 50, prop * nsv_class[i]]) for i in nsv_class]
+        
+        # Límites de la función de decisión
+        bounds = [decision_function_values[alphas_index].min(), decision_function_values[alphas_index].max()]
+        
+        # Definición de subconjuntos positivo y negativo
+        pos_values = np.where(decision_function_values>0)[0]
+        neg_values = np.where(decision_function_values<0)[0]
+        x_pos = pos_values[(decision_function_values[pos_values]).argsort().argsort()<samp_prop[1]]
+        x_neg = neg_values[((-1)*decision_function_values[neg_values]).argsort().argsort()<samp_prop[-1]]
+            
+        return nsv_class, bounds, x_pos, x_neg
+    
+    
     def _is_param_grid(self):
         """Private function for checking param_grid format. """
         
