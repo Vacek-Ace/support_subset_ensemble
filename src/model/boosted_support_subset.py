@@ -63,8 +63,6 @@ class BoostedSupportSubset():
 
     def _support_subset_estimation(self, sample, target, clf, prop=1):
 
-        # Ajuste de proporción de puntos en el subconjunto soporte
-        prop = prop + 1
 
         # Evaluación de distancia al hiperplano
         decision_function_values = clf.decision_function(sample)
@@ -84,8 +82,8 @@ class BoostedSupportSubset():
         # Tamaño muestra de los sunconjuntos positivo y negativo
         samp_prop = [np.max([nsv_class[i] + 50, prop * nsv_class[i]]) for i in nsv_class]
         
-        # Límites de la función de decisión
-        bounds = [decision_function_values[alphas_index].min(), decision_function_values[alphas_index].max()]
+        # # Límites de la función de decisión
+        # bounds = [decision_function_values[alphas_index].min(), decision_function_values[alphas_index].max()]
         
         # Definición de subconjuntos positivo y negativo
         pos_values = np.where(decision_function_values>0)[0]
@@ -93,7 +91,7 @@ class BoostedSupportSubset():
         x_pos = pos_values[(decision_function_values[pos_values]).argsort().argsort()<samp_prop[1]]
         x_neg = neg_values[((-1)*decision_function_values[neg_values]).argsort().argsort()<samp_prop[-1]]
             
-        return nsv_class, bounds, x_pos, x_neg
+        return nsv_class, x_pos, x_neg
     
     
     def _is_param_grid(self):
