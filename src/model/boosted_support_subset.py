@@ -4,7 +4,6 @@ from joblib import Parallel, delayed
 import logging
 
 import statistics
-import pandas as pd
 import numpy as np
 
 from sklearn.neighbors import KNeighborsClassifier
@@ -80,10 +79,7 @@ class BoostedSupportSubset():
         nsv_class = Counter(target[alphas_index])
         
         # Tamaño muestra de los sunconjuntos positivo y negativo
-        samp_prop = [np.max([nsv_class[i] + 50, prop * nsv_class[i]]) for i in nsv_class]
-        
-        # # Límites de la función de decisión
-        # bounds = [decision_function_values[alphas_index].min(), decision_function_values[alphas_index].max()]
+        samp_prop = [prop * nsv_class[i] for i in nsv_class]
         
         # Definición de subconjuntos positivo y negativo
         pos_values = np.where(decision_function_values>0)[0]
@@ -91,7 +87,7 @@ class BoostedSupportSubset():
         x_pos = pos_values[(decision_function_values[pos_values]).argsort().argsort()<samp_prop[1]]
         x_neg = neg_values[((-1)*decision_function_values[neg_values]).argsort().argsort()<samp_prop[-1]]
             
-        return nsv_class, x_pos, x_neg
+        return nsv_class, x_pos, x_neg, alphas_index
     
     
     def _is_param_grid(self):

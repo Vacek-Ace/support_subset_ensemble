@@ -1,10 +1,10 @@
 from setuptools import find_packages, setup
 
 setup(
-    name='moe',
+    name='bss',
     packages=find_packages(),
     version='0.1.0',
-    description='Minimally Overfitted Ensemble',
+    description='Boosted Support Subsets',
     author='Víctor Aceña Gil',
     license='',
 )
