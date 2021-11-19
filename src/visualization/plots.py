@@ -75,7 +75,7 @@ def learners_decision_regions_plot(X, y, learners, zoom=1):
         scatter_highlight_kwargs = {'s': 60, 'label': 'Test data', 'alpha': 0.7, 'c': 'red'}
 
         # Plotting decision regions       
-        plot_decision_regions(X=X[np.ix_(clf_learner['data']['train_indexes'], clf_learner['data']['selected_features'])], 
+        plot_decision_regions(X=X[clf_learner['data']['train_indexes']], 
                               y=y[clf_learner['data']['train_indexes']],
                               clf=clf_learner['learner'],
                               legend=2, 
