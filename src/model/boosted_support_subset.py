@@ -94,6 +94,8 @@ class BoostedSupportSubset():
         
         while True:
             sample_idx, active_idx = self._generate_sample_indices(ss_idx, max_idx, idx_learner)
+            # print('active data: ', active_idx)
+            # print('sample data: ', sample_idx)
             fail_condition = self._fail_condition(active_idx, target, idx_learner)
             if fail_condition:
                 self.learners = learners
@@ -102,6 +104,8 @@ class BoostedSupportSubset():
                 x = data_train[sample_idx]
                 y =  target[sample_idx]
                 learner = self._fit_learner(x, y, sample_idx)
+                # print('ss data: ', learner['data']['support_subset_indexes'])
+                # print('\n')
                 ss_idx.extend(learner['data']['support_subset_indexes'])
                 learners.append(learner)
                 idx_learner += 1
@@ -129,7 +133,9 @@ class BoostedSupportSubset():
         
         learner.fit(x, y)
         
-        ss_idx = self._support_subset_estimation(x, y, learner, prop=1, n_min=0)
+        sample_ss_idx = self._support_subset_estimation(x, y, learner, prop=1, n_min=0)
+        
+        ss_idx = sample_idx[sample_ss_idx]
         
         return {
         'data': {
