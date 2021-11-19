@@ -39,7 +39,7 @@ def half_moons(n=1000, prop_test=0.1, noise=0.1, seed=1234):
     
     return train_test_split(X, y, random_state = seed, test_size=prop_test, stratify=y)
 
-def normal(n=1000, prop_test=0.1, noise=0.5, centers=12, seed=1234):
+def normal(n=1000, prop_test=0.1, noise=0.5, centers=12, seed=1234, train_test=False):
     
     
     np.random.seed(seed)
@@ -48,6 +48,11 @@ def normal(n=1000, prop_test=0.1, noise=0.5, centers=12, seed=1234):
     X, y = datasets.make_blobs(n_samples=n, centers=centers, n_features=2, random_state=seed, cluster_std=noise)
     y = y % 2
     
-    return train_test_split(X, y, random_state = seed, test_size=prop_test, stratify=y)
+    if train_test:
+        sets = train_test_split(X, y, random_state = seed, test_size=prop_test, stratify=y)
+    else:
+        sets = X, y
+    
+    return sets
 
 
