@@ -17,7 +17,7 @@ class BoostedSupportSubset():
                 #  lam=1, 
                 #  eval_metric=accuracy_score, 
                  prop_sample=0.1, 
-                 n_learners=10,
+                 n_learners=None,
                  random_state=1234):
         """Minimally Overfitted Ensemble. 
 
@@ -90,29 +90,34 @@ class BoostedSupportSubset():
         ss_idx = []
         max_idx = len(data_train)
         idx_learner = 0
+        learners = []
         
         while True:
             sample_idx, active_idx = self._generate_sample_indices(ss_idx, max_idx, idx_learner)
-            fail_condition = self._fail_condition(active_idx, target)
+            fail_condition = self._fail_condition(active_idx, target, idx_learner)
             if fail_condition:
+                self.learners = learners
                 break
             else:
                 x = data_train[sample_idx]
                 y =  target[sample_idx]
-                self._fit_learner(self, x, y, sample_idx)
+                learner = self._fit_learner(x, y, sample_idx)
+                ss_idx.extend(learner['data']['support_subset_indexes'])
+                learners.append(learner)
                 idx_learner += 1
-        return None
     
     
-    def _fail_condition(self, active_idx, target):
+    def _fail_condition(self, active_idx, target, idx_learner):
         
         len_condition = len(active_idx) < self.num_samples_boostrap
         
         n_classes = Counter(target[active_idx])
         
-        classes_condition = (sum([n_classes[i] > 2 for i in n_classes]) == 2)
+        n_learners = idx_learner > (self.n_learners -1)
+        
+        classes_condition = (sum([n_classes[i] > 2 for i in n_classes]) < 2)
     
-        fail_condition = len_condition | classes_condition
+        fail_condition = len_condition | classes_condition | n_learners
     
         return fail_condition
         
@@ -124,7 +129,7 @@ class BoostedSupportSubset():
         
         learner.fit(x, y)
         
-        ss_idx = self._support_subset_estimation(self, x, y, learner, prop=1, n_min=0)
+        ss_idx = self._support_subset_estimation(x, y, learner, prop=1, n_min=0)
         
         return {
         'data': {
@@ -133,14 +138,14 @@ class BoostedSupportSubset():
             },
         'learner': learner
         }
-    
+        
     
     def _generate_sample_indices(self, ss_idx, max_idx, idx_learner):
         
         active_idx = [i for i in range(max_idx) if i not in ss_idx]
         
         random_instance = check_random_state(self.random_state + idx_learner)
-        sample_idx = random_instance.choices(active_idx, self.num_samples_boostrap) 
+        sample_idx = random_instance.choice(active_idx, self.num_samples_boostrap) 
         
         return sample_idx, active_idx
     
@@ -157,7 +162,7 @@ class BoostedSupportSubset():
         """
         
         try:
-            preds = learner['learner'].predict(X[:, learner['data']['selected_features']])
+            preds = learner['learner'].predict(X)
         except:
             preds = None
         return preds
