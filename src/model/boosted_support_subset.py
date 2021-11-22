@@ -12,10 +12,7 @@ class BoostedSupportSubset():
                  method=SVC, 
                  params={'C': 1, 'kernel': 'linear'}, 
                  sample_size=None, 
-                #  wrab=True, 
                 #  max_features='auto', 
-                #  lam=1, 
-                #  eval_metric=accuracy_score, 
                  support_subset = True, 
                  prop_sample=0.1, 
                  n_learners=None,
@@ -38,11 +35,7 @@ class BoostedSupportSubset():
         self.method = method
         self.params = params
         self.sample_size = sample_size
-        # self.wrab = wrab
-        # self.rof = 0
         # self.max_features = max_features
-        # self.lam = lam
-        # self.eval_metric = eval_metric
         self.support_subset = support_subset
         self.prop_sample = prop_sample
         self.n_learners = n_learners
@@ -89,63 +82,57 @@ class BoostedSupportSubset():
         else:
             self.num_samples = int(data_train.shape[0]*self.prop_sample)
 
-        ss_idx = []
-        max_idx = len(data_train)
+        excluded_idx = []
         idx_learner = 0
         learners = []
+        active_idx = [i for i in range(len(data_train))]
         
-        while True:
+        while len(active_idx) >= self.num_samples:
             
-            sample_idx, active_idx = self._generate_sample_indices(ss_idx, max_idx, idx_learner)
-            # print('active data: ', active_idx)
-            # print('sample data: ', sample_idx)
-            fail_condition = self._fail_condition(active_idx, target, idx_learner)
+            print(idx_learner)
+            print('active_idx: ', active_idx)
+            print('excluded_idx: ', sorted(excluded_idx))
+            print('\n')
+            
+            sample_idx = self._generate_sample_indexes(active_idx, idx_learner)
+            fail_condition = self._fail_condition(sample_idx, target, idx_learner)
+            
             if fail_condition:
-                self.learners = learners
                 break
             else:
                 x = data_train[sample_idx]
                 y =  target[sample_idx]
                 learner = self._fit_learner(x, y, sample_idx)
-                # print('ss data: ', learner['data']['support_subset_indexes'])
-                # print('\n')
-                ss_idx.extend(learner['data']['support_subset_indexes'])
+                excluded_idx.extend(learner['data']['support_subset_indexes'])
                 learners.append(learner)
                 idx_learner += 1
+                active_idx = self._active_set(max(active_idx), excluded_idx)
+        self.learners = learners
     
-    
-    def _active_set(self, max_idx, ss_idx):
+    def _active_set(self, max_idx, excluded_idx):
         
         if self.support_subset:
-            active_idx = [i for i in range(max_idx) if i not in ss_idx]
+            active_idx = [i for i in range(max_idx) if i not in excluded_idx]
         else:
             active_idx = [i for i in range(max_idx)]
     
-        max_idx_new = max(active_idx)
+        return active_idx
     
-        return active_idx, max_idx_new
-    
-    def _generate_sample_indices(self, ss_idx, max_idx, idx_learner):
-        
-        active_idx, max_idx = self._active_set(max_idx, ss_idx)
+    def _generate_sample_indexes(self, active_idx, idx_learner):
         
         random_instance = check_random_state(self.random_state + idx_learner)
-        sample_idx = random_instance.choice(active_idx, self.num_samples) 
-        
-        return sample_idx, active_idx
+        sample_idx = random_instance.choice(active_idx, size=self.num_samples, replace=False)
+
+        return sample_idx
     
     
-    def _fail_condition(self, active_idx, target, idx_learner):
+    def _fail_condition(self, sample_idx, target, idx_learner):
         
-        len_condition = len(active_idx) < self.num_samples
-        
-        n_classes = Counter(target[active_idx])
-        
-        n_learners = idx_learner > (self.n_learners -1)
-        
+        n_learners = idx_learner > (self.n_learners - 2)
+        n_classes = Counter(target[sample_idx])
         classes_condition = (sum([n_classes[i] > 2 for i in n_classes]) < 2)
-    
-        fail_condition = len_condition | classes_condition | n_learners
+
+        fail_condition = classes_condition | n_learners
     
         return fail_condition
         
@@ -160,7 +147,9 @@ class BoostedSupportSubset():
         sample_ss_idx = self._support_subset_estimation(x, y, learner, prop=1, n_min=0)
         
         ss_idx = sample_idx[sample_ss_idx]
-        
+        print('sample_idx: ', sorted(list(sample_idx)))
+        print('ss_indx: ', sorted(list(ss_idx)))
+        print('\n')
         return {
         'data': {
             'train_indexes': sample_idx,
