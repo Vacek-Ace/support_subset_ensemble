@@ -43,7 +43,7 @@ class BoostedSupportSubset():
         # self.max_features = max_features
         # self.lam = lam
         # self.eval_metric = eval_metric
-        self.support_subset = True
+        self.support_subset = support_subset
         self.prop_sample = prop_sample
         self.n_learners = n_learners
         self.random_state = random_state
