@@ -16,6 +16,7 @@ class BoostedSupportSubset():
                 #  max_features='auto', 
                 #  lam=1, 
                 #  eval_metric=accuracy_score, 
+                 support_subset = True, 
                  prop_sample=0.1, 
                  n_learners=None,
                  random_state=1234):
@@ -42,6 +43,7 @@ class BoostedSupportSubset():
         # self.max_features = max_features
         # self.lam = lam
         # self.eval_metric = eval_metric
+        self.support_subset = True
         self.prop_sample = prop_sample
         self.n_learners = n_learners
         self.random_state = random_state
@@ -83,9 +85,9 @@ class BoostedSupportSubset():
         
         
         if self.sample_size is not None:
-            self.num_samples_boostrap = self.sample_size
+            self.num_samples = self.sample_size
         else:
-            self.num_samples_boostrap = int(data_train.shape[0]*self.prop_sample)
+            self.num_samples = int(data_train.shape[0]*self.prop_sample)
 
         ss_idx = []
         max_idx = len(data_train)
@@ -93,6 +95,7 @@ class BoostedSupportSubset():
         learners = []
         
         while True:
+            
             sample_idx, active_idx = self._generate_sample_indices(ss_idx, max_idx, idx_learner)
             # print('active data: ', active_idx)
             # print('sample data: ', sample_idx)
@@ -111,9 +114,30 @@ class BoostedSupportSubset():
                 idx_learner += 1
     
     
+    def _active_set(self, max_idx, ss_idx):
+        
+        if self.support_subset:
+            active_idx = [i for i in range(max_idx) if i not in ss_idx]
+        else:
+            active_idx = [i for i in range(max_idx)]
+    
+        max_idx_new = max(active_idx)
+    
+        return active_idx, max_idx_new
+    
+    def _generate_sample_indices(self, ss_idx, max_idx, idx_learner):
+        
+        active_idx, max_idx = self._active_set(max_idx, ss_idx)
+        
+        random_instance = check_random_state(self.random_state + idx_learner)
+        sample_idx = random_instance.choice(active_idx, self.num_samples) 
+        
+        return sample_idx, active_idx
+    
+    
     def _fail_condition(self, active_idx, target, idx_learner):
         
-        len_condition = len(active_idx) < self.num_samples_boostrap
+        len_condition = len(active_idx) < self.num_samples
         
         n_classes = Counter(target[active_idx])
         
@@ -146,14 +170,7 @@ class BoostedSupportSubset():
         }
         
     
-    def _generate_sample_indices(self, ss_idx, max_idx, idx_learner):
-        
-        active_idx = [i for i in range(max_idx) if i not in ss_idx]
-        
-        random_instance = check_random_state(self.random_state + idx_learner)
-        sample_idx = random_instance.choice(active_idx, self.num_samples_boostrap) 
-        
-        return sample_idx, active_idx
+
     
     
     def _parallel_predict(self, X, learner):
