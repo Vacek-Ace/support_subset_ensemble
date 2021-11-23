@@ -69,13 +69,17 @@ class BoostedSupportSubset():
         x_pos = pos_values[(decision_function_values[pos_values]).argsort().argsort()<samp_prop[1]]
         x_neg = neg_values[((-1)*decision_function_values[neg_values]).argsort().argsort()<samp_prop[-1]]
         
-        support_subset = np.hstack([x_pos, x_neg, alphas_index])
-            
-        return support_subset 
+        x_pos_nosv = [i for i in x_pos if i not in alphas_index]
+        x_neg_nosv = [i for i in x_neg if i not in alphas_index]
+        support_subset = np.hstack([i for i in [x_pos_nosv, x_neg_nosv, alphas_index] if len(i) > 0])
+        
+        print(x_pos_nosv)
+        print(x_neg_nosv)
+        print(alphas_index)
+        return support_subset.astype(int)
     
     
     def fit(self, data_train, target):
-        
         
         if self.sample_size is not None:
             self.num_samples = self.sample_size
@@ -89,10 +93,10 @@ class BoostedSupportSubset():
         
         while len(active_idx) >= self.num_samples:
             
-            print(idx_learner)
-            print('active_idx: ', active_idx)
-            print('excluded_idx: ', sorted(excluded_idx))
-            print('\n')
+            # print(idx_learner)
+            # print('active_idx: ', active_idx)
+            # print('excluded_idx: ', sorted(excluded_idx))
+            # print('\n')
             
             sample_idx = self._generate_sample_indexes(active_idx, idx_learner)
             fail_condition = self._fail_condition(sample_idx, target, idx_learner)
@@ -102,7 +106,7 @@ class BoostedSupportSubset():
             else:
                 x = data_train[sample_idx]
                 y =  target[sample_idx]
-                learner = self._fit_learner(x, y, sample_idx)
+                learner = self._fit_learner(x, y, sample_idx, active_idx, excluded_idx)
                 excluded_idx.extend(learner['data']['support_subset_indexes'])
                 learners.append(learner)
                 idx_learner += 1
@@ -128,32 +132,37 @@ class BoostedSupportSubset():
     
     def _fail_condition(self, sample_idx, target, idx_learner):
         
-        n_learners = idx_learner > (self.n_learners - 2)
+        n_learners = idx_learner > (self.n_learners - 1)
         n_classes = Counter(target[sample_idx])
         classes_condition = (sum([n_classes[i] > 2 for i in n_classes]) < 2)
 
         fail_condition = classes_condition | n_learners
+        
+        # print('classes_condition ', classes_condition)
+        # print('n_learners ', n_learners)
     
         return fail_condition
         
         
-        
-    def _fit_learner(self, x, y, sample_idx):
+    def _fit_learner(self, x, y, sample_idx, active_idx, excluded_idx):
         
         learner = self.method(**self.params, random_state=self.random_state)
         
         learner.fit(x, y)
         
         sample_ss_idx = self._support_subset_estimation(x, y, learner, prop=1, n_min=0)
-        
+        print(sample_ss_idx)
         ss_idx = sample_idx[sample_ss_idx]
-        print('sample_idx: ', sorted(list(sample_idx)))
-        print('ss_indx: ', sorted(list(ss_idx)))
-        print('\n')
+        # print('sample_idx: ', sorted(list(sample_idx)))
+        # print('ss_indx: ', sorted(list(ss_idx)))
+        # print('\n')
         return {
         'data': {
             'train_indexes': sample_idx,
-            'support_subset_indexes': ss_idx
+            'support_subset_indexes': ss_idx,
+            'active_indexes': np.array(active_idx),
+            'excluded_indexes': np.array(excluded_idx),
+            
             },
         'learner': learner
         }
