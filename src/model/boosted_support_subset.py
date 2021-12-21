@@ -1,4 +1,6 @@
 from collections import Counter
+import functools
+import operator
 from joblib import Parallel, delayed
 import statistics
 import numpy as np
@@ -104,16 +106,21 @@ class BoostedSupportSubset():
                 partition_idx.append(np.where(mask)[0])
                 feature_space_condition = len({x for l in partition_idx for x in l})
                 if not feature_space_condition < len(data_train):
-                    break
-                
+                    break             
         return partition_idx
     
-    def _parallel_build_learners(self, learning_set, target, active_idx):
+    def _parallel_build_learners(self, learning_set, target, active_idx, region):
+        current_active_idx = active_idx
         excluded_idx = []
         idx_learner = 0
         learners = []
         
-        while len(active_idx) >= self.num_samples:
+        if self.sample_size is not None:
+            num_samples = self.sample_size
+        else:
+            num_samples = int(len(active_idx)*self.prop_sample)
+        
+        while len(current_active_idx) >= num_samples:
             
             # print(idx_learner)
             # print('active_idx: ', active_idx)
@@ -121,7 +128,8 @@ class BoostedSupportSubset():
             # print('\n')
             
             for j in range(1000):
-                sample_idx, features_idx, sample_seed = self._generate_sample_indexes(active_idx, idx_learner, j)
+                sample_idx, features_idx, sample_seed = self._generate_sample_indexes(current_active_idx, idx_learner, num_samples, j)
+                # print(sample_idx)
                 if len(np.unique(target[sample_idx]))>1:
                         break
                 # else:
@@ -134,21 +142,21 @@ class BoostedSupportSubset():
             else:
                 x = learning_set[np.ix_(sample_idx, features_idx)]
                 y =  target[sample_idx]
-                learner = self._fit_learner(x, y, sample_idx, features_idx, active_idx, excluded_idx, sample_seed)
+                learner = self._fit_learner(x, y, sample_idx, features_idx, current_active_idx, excluded_idx, region, sample_seed)
                 excluded_idx.extend(learner['data']['support_subset_indexes'])
                 learners.append(learner)
                 idx_learner += 1
-                active_idx = self._active_set(max(active_idx), excluded_idx)
+                current_active_idx = self._active_set(current_active_idx, excluded_idx)
      
         return learners
     
     
     def fit(self, data_train, target, n_jobs):
         
-        if self.sample_size is not None:
-            self.num_samples = self.sample_size
-        else:
-            self.num_samples = int(data_train.shape[0]*self.prop_sample)
+        # if self.sample_size is not None:
+        #     self.num_samples = self.sample_size
+        # else:
+        #     self.num_samples = int(data_train.shape[0]*self.prop_sample)
             
         self.n_features_ = data_train.shape[1]
         
@@ -168,26 +176,27 @@ class BoostedSupportSubset():
         
         region_active_idx = self._kmeans_sample(data_train, target)
 
-        self.learners = Parallel(n_jobs=n_jobs, **_joblib_parallel_args(prefer='threads'))(
-        delayed(self._parallel_build_learners)(data_train, target, active_idx)
-        for active_idx in region_active_idx)
+        learners = Parallel(n_jobs=n_jobs, **_joblib_parallel_args(prefer='threads'))(
+        delayed(self._parallel_build_learners)(data_train, target, active_idx, region)
+        for region, active_idx in enumerate(region_active_idx))
 
+        self.learners = functools.reduce(operator.iconcat, learners, [])
     
-    def _active_set(self, max_idx, excluded_idx):
+    def _active_set(self, current_active_set, excluded_idx):
         
         if self.support_subset:
-            active_idx = [i for i in range(max_idx) if i not in excluded_idx]
+            active_idx = [i for i in current_active_set if i not in excluded_idx]
         else:
-            active_idx = [i for i in range(max_idx)]
+            active_idx = [i for i in current_active_set]
     
         return active_idx
     
-    def _generate_sample_indexes(self, active_idx, idx_learner, j):
+    def _generate_sample_indexes(self, active_idx, idx_learner, num_samples, j):
         
         sample_seed = self.random_state + idx_learner + j
         
         random_instance = check_random_state(sample_seed)
-        sample_idx = random_instance.choice(active_idx, size=self.num_samples, replace=False)
+        sample_idx = random_instance.choice(active_idx, size=num_samples, replace=False)
         
         if self.max_features == self.n_features_:
             features_idx = range(self.n_features_)
@@ -213,12 +222,12 @@ class BoostedSupportSubset():
         return fail_condition
         
         
-    def _fit_learner(self, x, y, sample_idx, features_idx, active_idx, excluded_idx, sample_seed):
+    def _fit_learner(self, x, y, sample_idx, features_idx, active_idx, excluded_idx, region, sample_seed):
         
         learner = self.method(**self.params, random_state=self.random_state)
         
         learner.fit(x, y)
-        
+
         sample_ss_idx = self._support_subset_estimation(x, y, learner, prop=1, n_min=0)
         # print(sample_ss_idx)
         ss_idx = sample_idx[sample_ss_idx]
@@ -226,6 +235,7 @@ class BoostedSupportSubset():
         # print('ss_indx: ', sorted(list(ss_idx)))
         # print('\n')
         return {
+        'region_space': region,
         'data': {
             'seed': sample_seed,
             'train_indexes': sample_idx,
