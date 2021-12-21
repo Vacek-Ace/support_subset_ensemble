@@ -89,8 +89,9 @@ def learners_decision_regions_plot(X, y, learners, zoom=1):
                               scatter_kwargs=scatter_kwargs,
                               contourf_kwargs=contourf_kwargs,
                               scatter_highlight_kwargs=scatter_highlight_kwargs)
-
-        ax.set_title(clf_learner['learner'])
+        
+        title = f"{clf_learner['learner']}, region {clf_learner['region_space']}"
+        ax.set_title(title)
         ax.set_xlim([int(X[:, 0].min() - 2) , int(X[:, 0].max() + 2)])
         ax.set_ylim([int(X[:, 1].min() - 2) , int(X[:, 1].max() + 2)])
 
