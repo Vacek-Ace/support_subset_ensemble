@@ -34,14 +34,16 @@ def tqdm_joblib(tqdm_object):
 def StratifiedKFoldTestPredictions(X, y, clf, k=10, n_jobs=-1):
     skf = StratifiedKFold(n_splits=k)
     preds = np.empty_like(y)
-
+    i = 0
     for train_index, test_index in skf.split(X, y):
+        # print(i)
+        # print(train_index, test_index)
         try:
             clf.fit(X[train_index], y[train_index], n_jobs=n_jobs)
         except:
             clf.fit(X[train_index], y[train_index])
         preds[test_index] = clf.predict(X[test_index])
-
+        i += 1
     return preds
 
 

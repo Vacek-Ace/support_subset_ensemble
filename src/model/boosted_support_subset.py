@@ -12,7 +12,7 @@ class BoostedSupportSubset():
                  method=SVC, 
                  params={'C': 1, 'kernel': 'linear'}, 
                  sample_size=None, 
-                #  max_features='auto', 
+                 max_features='auto', 
                  support_subset = True, 
                  prop_sample=0.1, 
                  n_learners=None,
@@ -35,7 +35,7 @@ class BoostedSupportSubset():
         self.method = method
         self.params = params
         self.sample_size = sample_size
-        # self.max_features = max_features
+        self.max_features = max_features
         self.support_subset = support_subset
         self.prop_sample = prop_sample
         self.n_learners = n_learners
@@ -69,13 +69,13 @@ class BoostedSupportSubset():
         x_pos = pos_values[(decision_function_values[pos_values]).argsort().argsort()<samp_prop[1]]
         x_neg = neg_values[((-1)*decision_function_values[neg_values]).argsort().argsort()<samp_prop[-1]]
         
-        x_pos_nosv = [i for i in x_pos if i not in alphas_index]
-        x_neg_nosv = [i for i in x_neg if i not in alphas_index]
-        support_subset = np.hstack([i for i in [x_pos_nosv, x_neg_nosv, alphas_index] if len(i) > 0])
+        x_pos_nosv = [ss_pos for ss_pos in x_pos if ss_pos not in alphas_index]
+        x_neg_nosv = [ss_neg for ss_neg in x_neg if ss_neg not in alphas_index]
+        support_subset = np.hstack([valid_list for valid_list in [x_pos_nosv, x_neg_nosv, alphas_index] if len(valid_list) > 0])
         
-        print(x_pos_nosv)
-        print(x_neg_nosv)
-        print(alphas_index)
+        # print(x_pos_nosv)
+        # print(x_neg_nosv)
+        # print(alphas_index)
         return support_subset.astype(int)
     
     
@@ -85,11 +85,27 @@ class BoostedSupportSubset():
             self.num_samples = self.sample_size
         else:
             self.num_samples = int(data_train.shape[0]*self.prop_sample)
+            
+        n_samples, self.n_features_ = data_train.shape
+        
+        if isinstance(self.max_features, str):
+            if self.max_features == "auto":
+                    num_features = self.n_features_
+            elif self.max_features == "sqrt":
+                num_features = max(1, int(np.sqrt(self.n_features_)))
+            elif self.max_features == "log2":
+                num_features = max(1, int(np.log2(self.n_features_)))
+            else:
+                raise ValueError("Invalid value for max_features. "
+                                 "Allowed string values are 'auto', "
+                                 "'sqrt' or 'log2'.")
+
+        self.max_features_ = num_features
 
         excluded_idx = []
         idx_learner = 0
         learners = []
-        active_idx = [i for i in range(len(data_train))]
+        active_idx = [i for i in range(n_samples)]
         
         while len(active_idx) >= self.num_samples:
             
@@ -98,15 +114,21 @@ class BoostedSupportSubset():
             # print('excluded_idx: ', sorted(excluded_idx))
             # print('\n')
             
-            sample_idx = self._generate_sample_indexes(active_idx, idx_learner)
+            for j in range(1000):
+                sample_idx, features_idx = self._generate_sample_indexes(active_idx, idx_learner, j)
+                if len(np.unique(target[sample_idx]))>1:
+                        break
+                else:
+                    print('No valid sample in 1000 iters')
+                
             fail_condition = self._fail_condition(sample_idx, target, idx_learner)
             
             if fail_condition:
                 break
             else:
-                x = data_train[sample_idx]
+                x = data_train[np.ix_(sample_idx, features_idx)]
                 y =  target[sample_idx]
-                learner = self._fit_learner(x, y, sample_idx, active_idx, excluded_idx)
+                learner = self._fit_learner(x, y, sample_idx, features_idx, active_idx, excluded_idx)
                 excluded_idx.extend(learner['data']['support_subset_indexes'])
                 learners.append(learner)
                 idx_learner += 1
@@ -122,12 +144,17 @@ class BoostedSupportSubset():
     
         return active_idx
     
-    def _generate_sample_indexes(self, active_idx, idx_learner):
+    def _generate_sample_indexes(self, active_idx, idx_learner, j):
         
-        random_instance = check_random_state(self.random_state + idx_learner)
+        random_instance = check_random_state(self.random_state + idx_learner + j)
         sample_idx = random_instance.choice(active_idx, size=self.num_samples, replace=False)
+        
+        if self.max_features == self.n_features_:
+            features_idx = range(self.n_features_)
+        else:
+            features_idx = random_instance.choice(range(self.n_features_), self.max_features_, replace=False)
 
-        return sample_idx
+        return sample_idx, np.sort(features_idx)
     
     
     def _fail_condition(self, sample_idx, target, idx_learner):
@@ -144,14 +171,14 @@ class BoostedSupportSubset():
         return fail_condition
         
         
-    def _fit_learner(self, x, y, sample_idx, active_idx, excluded_idx):
+    def _fit_learner(self, x, y, sample_idx, features_idx, active_idx, excluded_idx):
         
         learner = self.method(**self.params, random_state=self.random_state)
         
         learner.fit(x, y)
         
         sample_ss_idx = self._support_subset_estimation(x, y, learner, prop=1, n_min=0)
-        print(sample_ss_idx)
+        # print(sample_ss_idx)
         ss_idx = sample_idx[sample_ss_idx]
         # print('sample_idx: ', sorted(list(sample_idx)))
         # print('ss_indx: ', sorted(list(ss_idx)))
@@ -159,6 +186,7 @@ class BoostedSupportSubset():
         return {
         'data': {
             'train_indexes': sample_idx,
+            'features_indexes': features_idx,
             'support_subset_indexes': ss_idx,
             'active_indexes': np.array(active_idx),
             'excluded_indexes': np.array(excluded_idx),
@@ -183,7 +211,7 @@ class BoostedSupportSubset():
         """
         
         try:
-            preds = learner['learner'].predict(X)
+            preds = learner['learner'].predict(X[:, learner['data']['features_indexes']])
         except:
             preds = None
         return preds
