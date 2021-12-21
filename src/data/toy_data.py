@@ -30,14 +30,19 @@ def two_normals(n=1000 , prop_dense=0.1, prop_test= 0.1, seed=1234):
     y_test = np.hstack((y_test_0, y_test_1))
     return X, X_test, y, y_test
 
-def half_moons(n=1000, prop_test=0.1, noise=0.1, seed=1234):
+def half_moons(n=1000, prop_test=0.1, noise=0.1, seed=1234, train_test=False):
     
     np.random.seed(seed)
     random.seed(seed)
     
     X, y = datasets.make_moons(n_samples=n, noise=noise, random_state=seed)
     
-    return train_test_split(X, y, random_state = seed, test_size=prop_test, stratify=y)
+    if train_test:
+        sets = train_test_split(X, y, random_state = seed, test_size=prop_test, stratify=y)
+    else:
+        sets = X, y
+    
+    return sets
 
 def normal(n=1000, prop_test=0.1, noise=0.5, centers=12, seed=1234, train_test=False):
     
