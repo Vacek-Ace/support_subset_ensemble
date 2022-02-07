@@ -1,6 +1,7 @@
 from collections import Counter
 import functools
 import operator
+from itertools import combinations
 from joblib import Parallel, delayed
 import statistics
 import numpy as np
@@ -84,29 +85,47 @@ class BoostedSupportSubset():
         return support_subset.astype(int)
     
     
+    # def _kmeans_sample(self, data_train, target):
+    
+    #     kmeans = KMeans(n_clusters=self.n_clusters, random_state=self.random_state).fit(data_train)
+        
+    #     partition_idx = []
+        
+    #     for i in range(1000):
+            
+    #         sample_seed = self.random_state + i
+            
+    #         random_instance = check_random_state(sample_seed)
+            
+    #         sample_cluster = random_instance.choice(range(self.n_clusters), size=2, replace=True)
+            
+    #         mask = np.isin(kmeans.labels_, sample_cluster)
+            
+    #         classes_condition = len(np.unique(target[mask]))<2
+            
+    #         if not classes_condition:
+    #             partition_idx.append(np.where(mask)[0])
+    #             # condición para evaluar que he recorrido todo datatrain, y parar cuando acabe
+    #             feature_space_condition = len({x for l in partition_idx for x in l})
+    #             if not feature_space_condition < len(data_train):
+    #                 break             
+    #     return partition_idx
+    
     def _kmeans_sample(self, data_train, target):
     
         kmeans = KMeans(n_clusters=self.n_clusters, random_state=self.random_state).fit(data_train)
         
         partition_idx = []
         
-        for i in range(1000):
+        for i in combinations(range(self.n_clusters), 2):
             
-            sample_seed = self.random_state + i
-            
-            random_instance = check_random_state(sample_seed)
-            
-            sample_cluster = random_instance.choice(range(self.n_clusters), size=2, replace=True)
-            
-            mask = np.isin(kmeans.labels_, sample_cluster)
+            mask = np.isin(kmeans.labels_, i)
             
             classes_condition = len(np.unique(target[mask]))<2
             
             if not classes_condition:
                 partition_idx.append(np.where(mask)[0])
-                feature_space_condition = len({x for l in partition_idx for x in l})
-                if not feature_space_condition < len(data_train):
-                    break             
+                
         return partition_idx
     
     def _parallel_build_learners(self, learning_set, target, active_idx, region):
