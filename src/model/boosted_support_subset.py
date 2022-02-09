@@ -163,6 +163,10 @@ class BoostedSupportSubset():
                 y =  target[sample_idx]
                 learner = self._fit_learner(x, y, sample_idx, features_idx, current_active_idx, excluded_idx, region, sample_seed)
                 excluded_idx.extend(learner['data']['support_subset_indexes'])
+                # condición para eliminar learners tontos
+                # prediction_condition = len(np.unique(learner['learner'].predict(x)))>1
+                # if not prediction_condition:
+                #     learner['learner'] = None
                 learners.append(learner)
                 idx_learner += 1
                 current_active_idx = self._active_set(current_active_idx, excluded_idx)
