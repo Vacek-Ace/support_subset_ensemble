@@ -14,13 +14,14 @@ from sklearn.utils.fixes import _joblib_parallel_args
 class BoostedSupportSubset():
     def __init__(self, 
                  method=SVC, 
-                 params={'C': 1, 'kernel': 'linear'}, 
+                 params={'C': 1, 'gamma': 1, 'kernel': 'rbf'}, 
                  sample_size=None, 
                  k=10,
                  max_features='auto', 
                  support_subset = True, 
                  prop_sample=0.1, 
                  n_learners=None,
+                 n_jobs=-1,
                  random_state=1234):
         """Minimally Overfitted Ensemble. 
 
@@ -45,6 +46,7 @@ class BoostedSupportSubset():
         self.support_subset = support_subset
         self.prop_sample = prop_sample
         self.n_learners = n_learners
+        self.n_jobs = n_jobs
         self.random_state = random_state
         self.learners = None
 
@@ -85,35 +87,11 @@ class BoostedSupportSubset():
         return support_subset.astype(int)
     
     
-    # def _kmeans_sample(self, data_train, target):
-    
-    #     kmeans = KMeans(n_clusters=self.n_clusters, random_state=self.random_state).fit(data_train)
-        
-    #     partition_idx = []
-        
-    #     for i in range(1000):
-            
-    #         sample_seed = self.random_state + i
-            
-    #         random_instance = check_random_state(sample_seed)
-            
-    #         sample_cluster = random_instance.choice(range(self.n_clusters), size=2, replace=True)
-            
-    #         mask = np.isin(kmeans.labels_, sample_cluster)
-            
-    #         classes_condition = len(np.unique(target[mask]))<2
-            
-    #         if not classes_condition:
-    #             partition_idx.append(np.where(mask)[0])
-    #             # condición para evaluar que he recorrido todo datatrain, y parar cuando acabe
-    #             feature_space_condition = len({x for l in partition_idx for x in l})
-    #             if not feature_space_condition < len(data_train):
-    #                 break             
-    #     return partition_idx
-    
     def _kmeans_sample(self, data_train, target):
     
         kmeans = KMeans(n_clusters=self.n_clusters, random_state=self.random_state).fit(data_train)
+        
+        # partition_idx = [[i for i in range(len(data_train))]]
         
         partition_idx = []
         
@@ -174,7 +152,7 @@ class BoostedSupportSubset():
         return learners
     
     
-    def fit(self, data_train, target, n_jobs):
+    def fit(self, data_train, target):
         
         # if self.sample_size is not None:
         #     self.num_samples = self.sample_size
@@ -199,11 +177,12 @@ class BoostedSupportSubset():
         
         region_active_idx = self._kmeans_sample(data_train, target)
 
-        learners = Parallel(n_jobs=n_jobs, **_joblib_parallel_args(prefer='threads'))(
+        learners = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
         delayed(self._parallel_build_learners)(data_train, target, active_idx, region)
         for region, active_idx in enumerate(region_active_idx))
-
+    
         self.learners = functools.reduce(operator.iconcat, learners, [])
+
     
     def _active_set(self, current_active_set, excluded_idx):
         
@@ -269,8 +248,7 @@ class BoostedSupportSubset():
             },
         'learner': learner
         }
-        
-    
+
 
     
     
@@ -303,7 +281,216 @@ class BoostedSupportSubset():
             [array]: Predictions.
         """
         
-        learners_predictions = Parallel(n_jobs=-1, **_joblib_parallel_args(prefer='threads'))(
+        learners_predictions = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
+        delayed(self._parallel_predict)(X, learner) for learner in self.learners)
+        
+        learners_predictions = [pred for pred in learners_predictions if pred is not None]
+        
+        if learners_predictions_return:
+            predictions = [learners_predictions, np.apply_along_axis(statistics.mode, 0, learners_predictions)]
+        else:
+            predictions = np.apply_along_axis(statistics.mode, 0, learners_predictions)
+        
+        return predictions
+
+
+class SupportSubsetEnsemble():
+    def __init__(self, 
+                 method=SVC, 
+                 params={'C': 1, 'gamma': 1, 'kernel': 'rbf'}, 
+                 sample_size=None, 
+                 k=10,
+                 support_subset = True, 
+                 prop_sample=0.7, 
+                 n_learners=None,
+                 n_jobs=-1,
+                 random_state=1234):
+        
+        self.method = method
+        self.params = params
+        self.sample_size = sample_size
+        self.n_clusters = k
+        self.support_subset = support_subset
+        self.prop_sample = prop_sample
+        self.n_learners = n_learners
+        self.n_jobs = n_jobs
+        self.random_state = random_state
+        self.learners = None
+        self.ss_idxs = []
+        self.ss_estimators = None
+        
+
+    def _support_subset_estimation(self, sample, target, clf, prop=1, n_min=0):
+
+
+        # Evaluación de distancia al hiperplano
+        decision_function_values = clf.decision_function(sample)
+        
+        # Índices de los vectores soporte
+        alphas_index = clf.support_
+        
+        # Identificación de los vectores soporte
+        pos_support = alphas_index[np.where(decision_function_values[alphas_index] > 0)]
+        neg_support = alphas_index[np.where(decision_function_values[alphas_index] < 0)]
+        decision_function_values[pos_support] = float("inf")
+        decision_function_values[neg_support] = float("-inf")
+        
+        # Conteo de vectores soporte según clase
+        nsv_class = Counter(target[alphas_index])
+        
+        # Tamaño muestra de los sunconjuntos positivo y negativo
+        samp_prop = [np.max([n_min, prop * nsv_class[i]]) for i in nsv_class]
+        
+        # Definición de subconjuntos positivo y negativo
+        pos_values = np.where(decision_function_values>0)[0]
+        neg_values = np.where(decision_function_values<0)[0]
+        x_pos = pos_values[(decision_function_values[pos_values]).argsort().argsort()<samp_prop[1]]
+        x_neg = neg_values[((-1)*decision_function_values[neg_values]).argsort().argsort()<samp_prop[-1]]
+        
+        x_pos_nosv = [ss_pos for ss_pos in x_pos if ss_pos not in alphas_index]
+        x_neg_nosv = [ss_neg for ss_neg in x_neg if ss_neg not in alphas_index]
+        support_subset = np.hstack([valid_list for valid_list in [x_pos_nosv, x_neg_nosv, alphas_index] if len(valid_list) > 0])
+        
+        # print(x_pos_nosv)
+        # print(x_neg_nosv)
+        # print(alphas_index)
+        return support_subset.astype(int)
+    
+    
+    def _kmeans_sample(self, data_train, target):
+    
+        kmeans = KMeans(n_clusters=self.n_clusters, random_state=self.random_state).fit(data_train)
+        
+        partition_idx = []
+        
+        for i in combinations(range(self.n_clusters), 2):
+            
+            mask = np.isin(kmeans.labels_, i)
+            
+            classes_condition = len(np.unique(target[mask]))<2
+            
+            if not classes_condition:
+                partition_idx.append(np.where(mask)[0])
+                
+        return partition_idx
+    
+    
+    def _parallel_build_ss_estimator(self, learning_set, target, active_idx, region):
+        
+        ss_estimators = []
+        
+        x = learning_set[active_idx]
+        y =  target[active_idx]
+        ss_estimator = self._fit_ss_estimator(x, y, active_idx, region)
+        ss_estimators.append(ss_estimator)
+        
+        return ss_estimators
+    
+    def _generate_sample_indices(self, data_train, target, idx_learner):
+        """ Private function used to _parallel_build_learners function. """
+
+        for i in range(1000):
+            random_instance = check_random_state(self.random_state + idx_learner + i)
+            train_index = random_instance.randint(0, data_train.shape[0], self.sample_size)
+            if len(np.unique(target[train_index]))>1:
+                break                    
+                    
+        return train_index
+
+    
+    def _parallel_build_learners(self, data_train, target, idx_learner):
+        
+        train_index = self._generate_sample_indices(data_train, target, idx_learner)
+  
+        X_train = data_train[train_index]
+        y_train = target[train_index]
+
+        try:
+            learner = self.method(**self.params, random_state=self.random_state)
+        except:
+            learner = self.method(**self.params)
+
+        learner.fit(X_train, y_train)
+
+        return {
+                'data':{'train_indexes': train_index},
+                'learner': learner
+                }
+    
+    
+    def fit(self, data_train, target):
+
+        region_active_idx = self._kmeans_sample(data_train, target)
+        
+        ss_estimators = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
+        delayed(self._parallel_build_ss_estimator)(data_train, target, active_idx, region)
+        for region, active_idx in enumerate(region_active_idx))
+
+        self.ss_estimators = functools.reduce(operator.iconcat, ss_estimators, [])
+        
+        for ss_estimator in self.ss_estimators:
+            self.ss_idxs.extend(ss_estimator['data']['support_subset_indexes'])
+            
+        
+        self.sample_size = int(self.prop_sample * len(self.ss_idxs))
+                
+        self.learners = Parallel(n_jobs=self.n_jobs,  **_joblib_parallel_args(prefer='threads'))(
+        delayed(self._parallel_build_learners)(data_train, target, idx_learner)
+        for idx_learner in range(self.n_learners))
+            
+        
+        
+        
+    def _fit_ss_estimator(self, x, y, sample_idx, region):
+        
+        learner = self.method(**self.params, random_state=self.random_state)
+        
+        learner.fit(x, y)
+
+        sample_ss_idx = self._support_subset_estimation(x, y, learner, prop=1, n_min=0)
+
+        ss_idx = sample_idx[sample_ss_idx]
+
+        return {
+        'region_space': region,
+        'data': {
+            'train_indexes': sample_idx,
+            'support_subset_indexes': ss_idx
+            },
+        'learner': learner
+        }
+        
+    
+    def _parallel_predict(self, X, learner):
+        """ Private function to parallel prediction.
+
+        Args:
+            X (array): Set from which the predictions are required.
+            learner ([type]): Single learner.
+
+        Returns:
+            [array]: Predictions.
+        """
+        
+        try:
+            preds = learner['learner'].predict(X)
+        except:
+            preds = None
+        return preds
+    
+    
+    def predict(self, X, learners_predictions_return=False):
+        """ Function to obtain new predictions.
+
+        Args:
+            X (array): Set from which the predictions are required.
+            learners_predictions_return (bool, optional): List of predictions from each single learner. Defaults to False.
+
+        Returns:
+            [array]: Predictions.
+        """
+        
+        learners_predictions = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
         delayed(self._parallel_predict)(X, learner) for learner in self.learners)
         
         learners_predictions = [pred for pred in learners_predictions if pred is not None]
