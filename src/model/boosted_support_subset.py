@@ -10,11 +10,6 @@ from sklearn.cluster import KMeans
 from sklearn.utils.validation import check_random_state
 from sklearn.utils.fixes import _joblib_parallel_args
 
-from sklearn.model_selection import ParameterGrid
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import matthews_corrcoef
-
-
 
 class BoostedSupportSubset():
     def __init__(self, 
