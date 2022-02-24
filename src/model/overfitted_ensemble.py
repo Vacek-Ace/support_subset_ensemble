@@ -19,6 +19,7 @@ class moe():
     def __init__(self, 
                  method=SVC, 
                  params={'C': [1, 10, 100, 1000], 'gamma': [0.0001, 0.001, 0.01, 0.1, 1, 10]}, 
+                 support_subset=None,
                  sample_size=None, 
                  wrab=True, 
                  max_features='auto', 
@@ -26,6 +27,7 @@ class moe():
                  eval_metric=accuracy_score, 
                  prop_sample=0.1, 
                  n_learners=10,
+                 n_jobs=-1,
                  random_state=1234):
         """Minimally Overfitted Ensemble. 
 
@@ -49,7 +51,8 @@ class moe():
             self.param_grid = list(ParameterGrid(params))
         else:
             self.param_grid = [params]
-            
+        
+        self.support_subset = support_subset
         self.sample_size = sample_size
         self.wrab = wrab
         self.rof = 0
@@ -58,6 +61,7 @@ class moe():
         self.eval_metric = eval_metric
         self.prop_sample = prop_sample
         self.n_learners = n_learners
+        self.n_jobs = n_jobs
         self.random_state = random_state
         self.learners = None
 
@@ -68,24 +72,44 @@ class moe():
 
         return search_best
     
+    def _wrab_layer(self, target, random_instance):
+        
+        prop_class_ini = round(random_instance.uniform(0.05, 0.95), 2)
+        num_samples_class_ini = max(int(prop_class_ini* self.num_samples_boostrap), 1)
+        num_samples = [num_samples_class_ini, self.num_samples_boostrap-(num_samples_class_ini)]
+        classes_index = [np.where(target == category)[0] for category in np.unique(target)]
+        
+        if self.support_subset is not None:
+        
+            classes_index_filtered = []
+            for i in classes_index:
+                classes_index_filtered.append([j for j in i if j in self.support_subset])
+        else:
+            classes_index_filtered = classes_index
+        
+        train_index =[]
+        for i in range(len(np.unique(target))):
+            train_index.extend(random_instance.choice(classes_index_filtered[i], int(num_samples[i])))
+                
+        return train_index
     
     def _generate_sample_indices(self, data_train, target, idx_learner):
         """ Private function used to _parallel_build_learners function. """
 
+        if self.support_subset is not None:
+            active_idx = self.support_subset
+        else:
+            active_idx = range(data_train.shape[0])
+        
         if self.wrab:
             random_instance = check_random_state(self.random_state + idx_learner)
-            prop_class_ini = round(random_instance.uniform(0.05, 0.95), 2)
-            num_samples_class_ini = max(int(prop_class_ini* self.num_samples_boostrap), 1)
-            num_samples = [num_samples_class_ini, self.num_samples_boostrap-(num_samples_class_ini)]
-            classes_index = [np.where(target == category)[0] for category in np.unique(target)]
+            train_index = self._wrab_layer(target[active_idx], random_instance)
             
-            train_index =[]
-            for i in range(len(np.unique(target))):
-                train_index.extend(random_instance.choice(classes_index[i], int(num_samples[i])))
+        # incluir opción de support subset not None    
         else:
             for i in range(1000):
                 random_instance = check_random_state(self.random_state + idx_learner + i)
-                train_index = random_instance.randint(0, data_train.shape[0], self.num_samples_boostrap)
+                train_index = random_instance.choice(active_idx, self.num_samples_boostrap)
                 if len(np.unique(target[train_index]))>1:
                     break                    
             else:
@@ -99,8 +123,9 @@ class moe():
                     
         return train_index, oob_index, np.sort(selected_features)
 
+
     
-    def _parallel_build_learners(self, data_train, target, idx_learner, verbose):
+    def _parallel_build_learners(self, data_train, target, idx_learner):
         """Private function to construct each limited learner parallely
 
         Args:
@@ -112,7 +137,7 @@ class moe():
         Returns:
             [dict]: Information of each single learner.
         """
-        
+
         train_index, oob_index, selected_features = self._generate_sample_indices(data_train, target, idx_learner)
   
         X_train = data_train[np.ix_(train_index, selected_features)]
@@ -124,8 +149,6 @@ class moe():
         best_learner = None
         best_score = float("inf")
         best_learner_train_error = None
-        best_learner_test_error = None
-        
         best_oob_error = None
         
         for learner_params in self.param_grid:
@@ -146,20 +169,16 @@ class moe():
                 best_score = learner_score
                 best_learner_train_error = train_error
                 best_oob_error = oob_error
-            
-            if verbose:
-                logging.error(f'Model:{learner}, score: {learner_score}, train_error: {train_error}, oob_error: {oob_error}')
-                
-        if verbose:
-            logging.error(f'Best Model:{best_learner}, score: {best_score}')
+
 
         return {
+                
+                'learner': best_learner, 
                 'data': {
                     'train_indexes': train_index,
                     'oob_indexes': oob_index,
                     'selected_features': selected_features
                  },
-                'learner': best_learner, 
                 'scores':{
                     'best_score': best_score,
                     'train_error': best_learner_train_error,
@@ -167,7 +186,7 @@ class moe():
                 }
                }
     
-    def fit(self, data_train, target, n_jobs=-1, verbose=False):
+    def fit(self, data_train, target):
         """ Find the minimally overfitted learner to each drawn sample.
 
         Args:
@@ -193,13 +212,18 @@ class moe():
 
         self.max_features_ = num_features
         
+        
         if self.sample_size is not None:
             self.num_samples_boostrap = self.sample_size
         else:
-            self.num_samples_boostrap = int(data_train.shape[0]*self.prop_sample)
+            if self.support_subset is not None:
+                self.num_samples_boostrap = int(len(self.support_subset)*self.prop_sample)
+            else:
+                self.num_samples_boostrap = int(data_train.shape[0]*self.prop_sample)
+            
 
-        self.learners = Parallel(n_jobs=n_jobs, verbose=verbose, **_joblib_parallel_args(prefer='threads'))(
-        delayed(self._parallel_build_learners)(data_train, target, idx_learner, verbose)
+        self.learners = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
+        delayed(self._parallel_build_learners)(data_train, target, idx_learner)
         for idx_learner in range(self.n_learners))
         
             
