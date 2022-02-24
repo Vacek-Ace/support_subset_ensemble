@@ -1,31 +1,27 @@
+from collections import Counter
 import numpy as np
-from joblib import Parallel, delayed
-from tqdm import tqdm 
+from sklearn.svm import SVC
 
-from utils import gridsearch, scaled_mcc
-
-
+from src.utils import gridsearch, scaled_mcc
 
 class SupportSubsetEstimator(gridsearch):
     def __init__(self, 
-                 method=SVC, 
-                 grid_params={'C': [1, 10, 100, 1000], 'gamma': [0.0001, 0.001, 0.01, 0.1, 1, 10]}, 
+                 method=SVC,
+                 params={'C': [1, 10, 100, 1000], 'gamma': [0.0001, 0.001, 0.01, 0.1, 1, 10]}, 
                  scoring=scaled_mcc,
                  cv=10,
                  n_jobs=-1,
-                 random_state=1234,
-                 kwargs=None
+                 random_state=1234
                  ):
-        super().__init__(self, 
-                 method=method, 
-                 grid_params=grid_params, 
+        super().__init__( 
+                 method, 
+                 params, 
                  scoring=scoring,
                  cv=cv,
                  n_jobs=n_jobs,
-                 random_state=random_state,
-                 kwargs=kwargs)
+                 random_state=random_state)
         
-        self.support=None
+        self.supportsubset = None
         
     def _support_subset_estimation(self, sample, target, clf, prop=1, n_min=0):
 
@@ -63,20 +59,16 @@ class SupportSubsetEstimator(gridsearch):
     def _is_param_grid(self):
         """Private function for checking param_grid format. """
         
-        search_best = any([isinstance(i, list) for i in self.params.values()])
+        search_best = any([isinstance(i, list) for i in self.grid_params.values()])
 
         return search_best
     
-    def fit(self, data_train, target, verbose=False):
-        """ Find the minimally overfitted learner to each drawn sample.
-
-        Args:
-            data_train (array): Learning set.
-            target (array): Labels of the learning set.
-            verbose (bool, optional): Log information. Defaults to False.
-        """
-
-        self.learners = Parallel(n_jobs=self.n_jobs, verbose=verbose, **_joblib_parallel_args(prefer='threads'))(
-        delayed(self._parallel_build_learners)(data_train, target, idx_learner, verbose)
-        for idx_learner in range(self.n_learners))
-        
+    def fit(self, data_train, target):
+        if self._is_param_grid():
+            gridsearch.fit(self, data_train, target)
+            clf = self.best_estimator_
+        else:   
+            clf = self.method(**self.params)
+            clf.fit(data_train, target)
+            
+        self.supportsubset = self._support_subset_estimation(data_train, target, clf, prop=1, n_min=0)
