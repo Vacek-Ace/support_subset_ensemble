@@ -75,7 +75,23 @@ def learners_decision_regions_plot(X, y, learners, zoom=1):
         scatter_highlight_kwargs = {'s': 60, 'label': 'Test data', 'alpha': 0.7, 'c': 'red'}
 
         # Plotting decision regions       
-        plot_decision_regions(X=X[np.ix_(clf_learner['data']['train_indexes'], clf_learner['data']['features_indexes'])], 
+        try:
+            plot_decision_regions(X=X[np.ix_(clf_learner['data']['train_indexes'], clf_learner['data']['features_indexes'])], 
+                              y=y[clf_learner['data']['train_indexes']],
+                              clf=clf_learner['learner'],
+                              legend=2, 
+                              ax = ax, 
+                              zoom_factor=zoom,
+                              
+#                             X=X[np.append(clf_learner['data']['train_indexes'],clf_learner['data']['oob_indexes'])], 
+#                             y=y[np.append(clf_learner['data']['train_indexes'],clf_learner['data']['oob_indexes'])],
+#                             X_highlight=X[clf_learner['data']['oob_indexes']],
+
+                              scatter_kwargs=scatter_kwargs,
+                              contourf_kwargs=contourf_kwargs,
+                              scatter_highlight_kwargs=scatter_highlight_kwargs)
+        except:
+            plot_decision_regions(X=X[clf_learner['data']['train_indexes']], 
                               y=y[clf_learner['data']['train_indexes']],
                               clf=clf_learner['learner'],
                               legend=2, 
@@ -90,7 +106,11 @@ def learners_decision_regions_plot(X, y, learners, zoom=1):
                               contourf_kwargs=contourf_kwargs,
                               scatter_highlight_kwargs=scatter_highlight_kwargs)
         
-        title = f"{clf_learner['learner']}, region {clf_learner['region_space']}"
+        
+        try:
+            title = f"{clf_learner['learner']}, region {clf_learner['region_space']}"
+        except:
+            title = f"{clf_learner['learner']}"
         ax.set_title(title)
         ax.set_xlim([int(X[:, 0].min() - 2) , int(X[:, 0].max() + 2)])
         ax.set_ylim([int(X[:, 1].min() - 2) , int(X[:, 1].max() + 2)])
