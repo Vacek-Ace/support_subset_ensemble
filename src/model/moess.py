@@ -1,10 +1,7 @@
-from collections import Counter
-import random
-from joblib import Parallel, delayed
-import logging
 
+from joblib import Parallel, delayed
 import statistics
-import pandas as pd
+
 import numpy as np
 
 from sklearn.neighbors import KNeighborsClassifier
@@ -14,12 +11,14 @@ from sklearn.utils.validation import check_random_state
 from sklearn.model_selection import ParameterGrid
 from sklearn.utils.fixes import _joblib_parallel_args
 
+from src.model.SupportSubsetEstimator import SupportSubsetEstimator
 
-class Moe():
+
+class MOESS():
     def __init__(self, 
                  method=SVC, 
                  params={'C': [1, 10, 100, 1000], 'gamma': [0.0001, 0.001, 0.01, 0.1, 1, 10]}, 
-                 support_subset=None,
+                 active_set_estimator=SupportSubsetEstimator,
                  sample_size=None, 
                  wrab=True, 
                  max_features='auto', 
@@ -52,10 +51,11 @@ class Moe():
         else:
             self.param_grid = [params]
         
-        self.support_subset = support_subset
+        self.active_set_estimator = active_set_estimator
+        self.active_set_ = None
         self.sample_size = sample_size
         self.wrab = wrab
-        self.rof = 0
+        self.rof_ = 0
         self.max_features = max_features
         self.lam = lam
         self.eval_metric = eval_metric
@@ -75,15 +75,15 @@ class Moe():
     def _wrab_layer(self, target, random_instance):
         
         prop_class_ini = round(random_instance.uniform(0.05, 0.95), 2)
-        num_samples_class_ini = max(int(prop_class_ini* self.num_samples_boostrap), 1)
-        num_samples = [num_samples_class_ini, self.num_samples_boostrap-(num_samples_class_ini)]
+        num_samples_class_ini = max(int(prop_class_ini* self.sample_size_), 1)
+        num_samples = [num_samples_class_ini, self.sample_size_-(num_samples_class_ini)]
         classes_index = [np.where(target == category)[0] for category in np.unique(target)]
         
-        if self.support_subset is not None:
-        
+        # Duda de tiempo, meter directamente active set o dejar el if
+        if self.active_set_estimator is not None:
             classes_index_filtered = []
             for i in classes_index:
-                classes_index_filtered.append([j for j in i if j in self.support_subset])
+                classes_index_filtered.append([j for j in i if j in self.active_set_])
         else:
             classes_index_filtered = classes_index
         
@@ -95,20 +95,16 @@ class Moe():
     
     def _generate_sample_indices(self, data_train, target, idx_learner):
         """ Private function used to _parallel_build_learners function. """
-
-        if self.support_subset is not None:
-            active_idx = self.support_subset
-        else:
-            active_idx = range(data_train.shape[0])
         
         if self.wrab:
             random_instance = check_random_state(self.random_state + idx_learner)
             train_index = self._wrab_layer(target, random_instance)
                
         else:
+            
             for i in range(1000):
                 random_instance = check_random_state(self.random_state + idx_learner + i)
-                train_index = random_instance.choice(active_idx, self.num_samples_boostrap)
+                train_index = random_instance.choice(self.active_set_, self.sample_size_)
                 if len(np.unique(target[train_index]))>1:
                     break                    
             else:
@@ -185,7 +181,7 @@ class Moe():
                 }
                }
     
-    def fit(self, data_train, target):
+    def fit(self, data_train, target, active_indexes=None):
         """ Find the minimally overfitted learner to each drawn sample.
 
         Args:
@@ -211,14 +207,20 @@ class Moe():
 
         self.max_features_ = num_features
         
+        if active_indexes is not None:
+            self.active_set_ = active_indexes
+        elif self.active_set_estimator is not None:
+             estimator = self.active_set_estimator()
+             estimator.fit(data_train, target)
+             self.active_set_ = estimator.supportsubset
+        else:
+            self.active_set_ = range(data_train.shape[0])
+        
         
         if self.sample_size is not None:
-            self.num_samples_boostrap = self.sample_size
+            self.sample_size_ = self.sample_size
         else:
-            if self.support_subset is not None:
-                self.num_samples_boostrap = int(len(self.support_subset)*self.prop_sample)
-            else:
-                self.num_samples_boostrap = int(data_train.shape[0]*self.prop_sample)
+            self.sample_size_ = int(len(self.active_set_)*self.prop_sample)
             
 
         self.learners = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
@@ -245,7 +247,7 @@ class Moe():
         oob_prediciton = model.predict(X_oob)
         oob_error = 1-self.eval_metric(y_oob, oob_prediciton)
         
-        if (oob_error - train_error > self.rof):
+        if (oob_error - train_error > self.rof_):
             
             model_score = train_error + self.lam*(oob_error - train_error)**2
             
