@@ -71,7 +71,8 @@ class gridsearch():
                  cv=10,
                  n_jobs=-1,
                  random_state=1234,
-                 kwargs=None):
+                 kwargs=None,
+                 verbose=True):
 
         self.method = method
         self.grid_params = grid_params
@@ -80,6 +81,7 @@ class gridsearch():
         self.n_jobs = n_jobs
         self.random_state = random_state
         self.kwargs = kwargs
+        self.verbose = verbose
 
     def _train_test_split(self, X, y):
 
@@ -112,9 +114,13 @@ class gridsearch():
         
         grid_params =list(ParameterGrid(self.grid_params))
 
-        with tqdm_joblib(tqdm(desc="Searching best hyperparameters", total=len(grid_params))) as progress_bar:
+        if self.verbose:
+            with tqdm_joblib(tqdm(desc="Searching best hyperparameters", total=len(grid_params))) as progress_bar:
+                self.scoring_results_ = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
+                    delayed(self._eval)(X, y, params)for params in grid_params)
+        else:
             self.scoring_results_ = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
-                delayed(self._eval)(X, y, params)for params in grid_params)
+                    delayed(self._eval)(X, y, params)for params in grid_params)
 
         self.best_index_ = np.argmax([result[3]
                                       for result in self.scoring_results_])

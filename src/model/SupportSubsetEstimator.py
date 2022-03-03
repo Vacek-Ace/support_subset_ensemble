@@ -1,3 +1,6 @@
+from sklearnex import patch_sklearn
+patch_sklearn()
+
 from collections import Counter
 import numpy as np
 from sklearn.svm import SVC
@@ -11,7 +14,8 @@ class SupportSubsetEstimator(gridsearch):
                  scoring=scaled_mcc,
                  cv=10,
                  n_jobs=-1,
-                 random_state=1234
+                 random_state=1234,
+                 verbose=False
                  ):
         super().__init__( 
                  method, 
@@ -19,7 +23,8 @@ class SupportSubsetEstimator(gridsearch):
                  scoring=scoring,
                  cv=cv,
                  n_jobs=n_jobs,
-                 random_state=random_state)
+                 random_state=random_state,
+                 verbose=verbose)
         
         self.supportsubset = None
         

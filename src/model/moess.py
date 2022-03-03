@@ -1,10 +1,12 @@
 
+from sklearnex import patch_sklearn
+patch_sklearn()
+
 from joblib import Parallel, delayed
 import statistics
 
 import numpy as np
 
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.svm import SVC
 from sklearn.utils.validation import check_random_state
