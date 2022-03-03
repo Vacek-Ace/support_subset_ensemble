@@ -1,10 +1,10 @@
 from setuptools import find_packages, setup
 
 setup(
-    name='bss',
+    name='MOESS',
     packages=find_packages(),
     version='0.1.0',
-    description='Boosted Support Subsets',
+    description='Monimally Overfitted Ensemble Support Subset based',
     author='Víctor Aceña Gil',
     license='',
 )
