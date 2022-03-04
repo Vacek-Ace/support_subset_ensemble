@@ -86,8 +86,7 @@ class gridsearch():
     def _train_test_split(self, X, y):
 
         skf = StratifiedKFold(n_splits=self.cv, random_state=self.random_state, shuffle=True)
-        k_fold_splits = [[train_index, test_index]
-                         for train_index, test_index in skf.split(X, y)]
+        k_fold_splits = list(skf.split(X, y))
         return k_fold_splits
 
     def _eval(self, X, y, params):
@@ -111,6 +110,67 @@ class gridsearch():
     def fit(self, X, y):
 
         self.k_fold_splits = self._train_test_split(X, y)
+        
+        grid_params =list(ParameterGrid(self.grid_params))
+
+        if self.verbose:
+            with tqdm_joblib(tqdm(desc="Searching best hyperparameters", total=len(grid_params))) as progress_bar:
+                self.scoring_results_ = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
+                    delayed(self._eval)(X, y, params)for params in grid_params)
+        else:
+            self.scoring_results_ = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
+                    delayed(self._eval)(X, y, params)for params in grid_params)
+
+        self.best_index_ = np.argmax([result[3]
+                                      for result in self.scoring_results_])
+
+        self.best_estimator_ = self.scoring_results_[self.best_index_][0]
+        self.best_params_ = self.scoring_results_[self.best_index_][1]
+        self.best_score_ = np.mean(self.scoring_results_[self.best_index_][2]), np.std(
+            self.scoring_results_[self.best_index_][2])
+
+
+class GridSearch_moess():
+
+    def __init__(self,
+                 method,
+                 grid_params,
+                 scoring=scaled_mcc,
+                 folds=None,
+                 n_jobs=-1,
+                 random_state=1234,
+                 kwargs=None,
+                 verbose=True):
+
+        self.method = method
+        self.grid_params = grid_params
+        self.scoring = scoring
+        self.k_fold_splits = folds
+        self.n_jobs = n_jobs
+        self.random_state = random_state
+        self.kwargs = kwargs
+        self.verbose = verbose
+
+
+    def _eval(self, X, y, params):
+
+        scores = []
+
+        if self.kwargs is None:
+            clf = self.method(**params)
+        else:
+            clf = self.method(**params, **self.kwargs)
+
+        for train_index, test_index, ss_index in self.k_fold_splits:
+
+            clf.fit(X[train_index], y[train_index], active_indexes=ss_index)
+
+            scores.append(self.scoring(
+                y[test_index], clf.predict(X[test_index])))
+
+        return [clf, params, scores, np.mean(scores)]
+
+    def fit(self, X, y):
         
         grid_params =list(ParameterGrid(self.grid_params))
 
