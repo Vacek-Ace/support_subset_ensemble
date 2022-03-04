@@ -23,9 +23,9 @@ for experiment in [
 #  'svmguide3',
 #  'transfusion',
 #  'german_numer',
- 'liver-disorders',
+#  'liver-disorders',
 #  'heart',
-#  'r2',
+ 'r2',
 #  'haberman',
 #  'svmguide1',
 #  'breastcancer',
@@ -52,13 +52,17 @@ for experiment in [
     y = data.y.values
 
     # hyperparameters gridsearch
+    random_state = 1234
+    
     grid_params = {
         'wrab': [True, False],
         'lam': [1, 3, 5],
         'prop_sample': [0.10, 0.20, 0.30],
         'n_learners': [10, 20, 30],
-        'random_state': [1234]
+        'random_state': [random_state]
     }
+
+# modificar para calcular una única vez los support subsets y los 10 folds, comprobar que entra bien el parámetro active_set
 
     # MOESS-kNN 
 
