@@ -3,15 +3,14 @@ import pandas as pd
 import pickle
 import warnings
 
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.svm import SVC
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.preprocessing import StandardScaler
-
 from src.model.SupportSubsetEstimator import *
 from src.model.moess import *
 from src.utils import *
 
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings('ignore')
 
@@ -45,14 +44,28 @@ for experiment in [
 
     data = pd.read_parquet(f'data/prep_real_data/{experiment}.parquet')
 
-
+    # hyperparameters gridsearch
+    random_state = 1234
+    
     # Preprocessing
     scaler = StandardScaler()
     X = scaler.fit_transform(data.drop(columns=['y']))
     y = data.y.values
 
-    # hyperparameters gridsearch
-    random_state = 1234
+    # Calcular particiones
+    skf = StratifiedKFold(n_splits=10, random_state=random_state, shuffle=True)
+    ss_estimator = SupportSubsetEstimator()
+    ss_idx = []
+    train_idx = []
+    test_idx = []
+
+    for train_index, test_index in tqdm(list(skf.split(X, y)), desc="Estimating Support Subsets"):
+        ss_estimator.fit(X[train_index], y[train_index])
+        train_idx.append(train_index)
+        test_idx.append(test_index)
+        ss_idx.append(ss_estimator.supportsubset)
+
+    folds = list(zip(train_idx, test_idx, ss_idx))
     
     grid_params = {
         'wrab': [True, False],
@@ -70,7 +83,7 @@ for experiment in [
 
     ensemble = MOESS
 
-    ensemble_grid = gridsearch(ensemble, grid_params, scoring=scaled_mcc, cv=10, n_jobs=-1, kwargs=kwargs)
+    ensemble_grid = GridSearch_moess(ensemble, grid_params, scoring=scaled_mcc, folds=folds, n_jobs=-1, kwargs=kwargs)
 
     print('MOESS knn: \n')
 
@@ -88,7 +101,7 @@ for experiment in [
 
     ensemble = MOESS
 
-    ensemble_grid = gridsearch(ensemble, grid_params, scoring=scaled_mcc, cv=10, n_jobs=-1, kwargs=kwargs)
+    ensemble_grid = GridSearch_moess(ensemble, grid_params, scoring=scaled_mcc, folds=folds, n_jobs=-1, kwargs=kwargs)
 
     print('MOESS dt: \n')
 
@@ -104,7 +117,7 @@ for experiment in [
     
     ensemble = MOESS
 
-    ensemble_grid = gridsearch(ensemble, grid_params, scoring=scaled_mcc, cv=10, n_jobs=-1)
+    ensemble_grid = GridSearch_moess(ensemble, grid_params, scoring=scaled_mcc, folds=folds, n_jobs=-1, kwargs=kwargs)
 
     print('MOESS svm : \n')
 
