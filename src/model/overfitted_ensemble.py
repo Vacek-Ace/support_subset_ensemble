@@ -1,26 +1,24 @@
-
-from sklearnex import patch_sklearn
-patch_sklearn()
-
+from collections import Counter
+import random
 from joblib import Parallel, delayed
-import statistics
+import logging
 
+import statistics
+import pandas as pd
 import numpy as np
 
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.svm import SVC
 from sklearn.utils.validation import check_random_state
 from sklearn.model_selection import ParameterGrid
 from sklearn.utils.fixes import _joblib_parallel_args
 
-from src.model.SupportSubsetEstimator import SupportSubsetEstimator
 
-
-class MOESS():
+class OverfittedEnsemble():
     def __init__(self, 
                  method=SVC, 
                  params={'C': [1, 10, 100, 1000], 'gamma': [0.0001, 0.001, 0.01, 0.1, 1, 10]}, 
-                 hot_set_estimator=SupportSubsetEstimator,
                  sample_size=None, 
                  wrab=True, 
                  max_features='auto', 
@@ -28,7 +26,6 @@ class MOESS():
                  eval_metric=accuracy_score, 
                  prop_sample=0.1, 
                  n_learners=10,
-                 n_jobs=-1,
                  random_state=1234):
         """Minimally Overfitted Ensemble. 
 
@@ -52,18 +49,15 @@ class MOESS():
             self.param_grid = list(ParameterGrid(params))
         else:
             self.param_grid = [params]
-        
-        self.hot_set_estimator = hot_set_estimator
-        self.hot_set_ = None
+            
         self.sample_size = sample_size
         self.wrab = wrab
-        self.rof_ = 0
+        self.rof = 0
         self.max_features = max_features
         self.lam = lam
         self.eval_metric = eval_metric
         self.prop_sample = prop_sample
         self.n_learners = n_learners
-        self.n_jobs = n_jobs
         self.random_state = random_state
         self.learners = None
 
@@ -74,59 +68,26 @@ class MOESS():
 
         return search_best
     
-    def _wrab_layer(self, target, random_instance, active_set):
-        
-        prop_class_ini = round(random_instance.uniform(0.05, 0.95), 2)
-        num_samples_class_ini = max(int(prop_class_ini* self.sample_size_), 1)
-        num_samples = [num_samples_class_ini, self.sample_size_-(num_samples_class_ini)]
-        classes_index = [np.where(target == category)[0] for category in np.unique(target)]
-
-        classes_index_filtered = []
-        for i in classes_index:
-            classes_index_filtered.append([j for j in i if j in active_set])
-    
-        train_index =[]
-        for i in range(len(np.unique(target))):
-            train_index.extend(random_instance.choice(classes_index_filtered[i], int(num_samples[i])))
-         
-        return train_index
-    
-    def _active_set(self, random_instance):
-        for i in range(1000):
-            prop = round(random_instance.uniform(0, 1), 2)
-            hot_size = int(len(self.hot_set_)*prop)
-            regular_size = int(len(self.regular_set_)*(1-prop))
-
-            hot_idx = random_instance.choice(self.hot_set_, hot_size)
-            regular_idx = random_instance.choice(self.regular_set_, regular_size)
-
-            active_set = np.hstack([hot_idx, regular_idx]).astype(int)
-            
-            if len(active_set) > 0:
-                break
-            
-        return active_set
     
     def _generate_sample_indices(self, data_train, target, idx_learner):
         """ Private function used to _parallel_build_learners function. """
-        
-        random_instance = check_random_state(self.random_state + idx_learner)
-        active_set = self._active_set(random_instance)
-        
+
         if self.wrab:
-            train_index = self._wrab_layer(target, random_instance, active_set)
-               
-        else:
+            random_instance = check_random_state(self.random_state + idx_learner)
+            prop_class_ini = round(random_instance.uniform(0.05, 0.95), 2)
+            num_samples_class_ini = max(int(prop_class_ini* self.num_samples_boostrap), 1)
+            num_samples = [num_samples_class_ini, self.num_samples_boostrap-(num_samples_class_ini)]
+            classes_index = [np.where(target == category)[0] for category in np.unique(target)]
             
+            train_index =[]
+            for i in range(len(np.unique(target))):
+                train_index.extend(random_instance.choice(classes_index[i], int(num_samples[i])))
+        else:
             for i in range(1000):
-                
-                train_index = random_instance.choice(active_set, self.sample_size_)
-                
-                try:
-                    if len(np.unique(target[train_index]))>1:
-                        break
-                except:
-                    raise Exception("Empty train index set {}".format((train_index, self.sample_size_)))                    
+                random_instance = check_random_state(self.random_state + idx_learner + i)
+                train_index = random_instance.randint(0, data_train.shape[0], self.num_samples_boostrap)
+                if len(np.unique(target[train_index]))>1:
+                    break                    
             else:
                 print('No valid sample in 1000 iters')                    
         oob_index = list(set(range(data_train.shape[0])) - set(np.unique(train_index)))
@@ -138,9 +99,8 @@ class MOESS():
                     
         return train_index, oob_index, np.sort(selected_features)
 
-
     
-    def _parallel_build_learners(self, data_train, target, idx_learner):
+    def _parallel_build_learners(self, data_train, target, idx_learner, verbose):
         """Private function to construct each limited learner parallely
 
         Args:
@@ -152,7 +112,7 @@ class MOESS():
         Returns:
             [dict]: Information of each single learner.
         """
-
+        
         train_index, oob_index, selected_features = self._generate_sample_indices(data_train, target, idx_learner)
   
         X_train = data_train[np.ix_(train_index, selected_features)]
@@ -164,6 +124,8 @@ class MOESS():
         best_learner = None
         best_score = float("inf")
         best_learner_train_error = None
+        best_learner_test_error = None
+        
         best_oob_error = None
         
         for learner_params in self.param_grid:
@@ -184,16 +146,20 @@ class MOESS():
                 best_score = learner_score
                 best_learner_train_error = train_error
                 best_oob_error = oob_error
-
+            
+            if verbose:
+                logging.error(f'Model:{learner}, score: {learner_score}, train_error: {train_error}, oob_error: {oob_error}')
+                
+        if verbose:
+            logging.error(f'Best Model:{best_learner}, score: {best_score}')
 
         return {
-                
-                'learner': best_learner, 
                 'data': {
                     'train_indexes': train_index,
                     'oob_indexes': oob_index,
                     'selected_features': selected_features
                  },
+                'learner': best_learner, 
                 'scores':{
                     'best_score': best_score,
                     'train_error': best_learner_train_error,
@@ -201,7 +167,7 @@ class MOESS():
                 }
                }
     
-    def fit(self, data_train, target, hot_indexes=None):
+    def fit(self, data_train, target, n_jobs=-1, verbose=False):
         """ Find the minimally overfitted learner to each drawn sample.
 
         Args:
@@ -226,31 +192,14 @@ class MOESS():
                                  "'sqrt' or 'log2'.")
 
         self.max_features_ = num_features
-        whole_set = range(data_train.shape[0])
-        
-        if hot_indexes is not None:
-            self.hot_set_ = hot_indexes
-            self.regular_set_ = list(set(whole_set)-set(self.hot_set_))
-            
-        elif self.hot_set_estimator is not None:
-             estimator = self.hot_set_estimator()
-             estimator.fit(data_train, target)
-             self.hot_set_ = estimator.supportsubset
-             self.regular_set_ = list(set(whole_set)-set(self.hot_set_))
-             
-        else:
-            self.hot_set_ = whole_set
-            self.regular_set_ = []
-        
         
         if self.sample_size is not None:
-            self.sample_size_ = self.sample_size
+            self.num_samples_boostrap = self.sample_size
         else:
-            self.sample_size_ = int(len(data_train)*self.prop_sample)
-            
+            self.num_samples_boostrap = int(data_train.shape[0]*self.prop_sample)
 
-        self.learners = Parallel(n_jobs=self.n_jobs, **_joblib_parallel_args(prefer='threads'))(
-        delayed(self._parallel_build_learners)(data_train, target, idx_learner)
+        self.learners = Parallel(n_jobs=n_jobs, verbose=verbose, **_joblib_parallel_args(prefer='threads'))(
+        delayed(self._parallel_build_learners)(data_train, target, idx_learner, verbose)
         for idx_learner in range(self.n_learners))
         
             
@@ -273,7 +222,7 @@ class MOESS():
         oob_prediciton = model.predict(X_oob)
         oob_error = 1-self.eval_metric(y_oob, oob_prediciton)
         
-        if (oob_error - train_error > self.rof_):
+        if (oob_error - train_error > self.rof):
             
             model_score = train_error + self.lam*(oob_error - train_error)**2
             

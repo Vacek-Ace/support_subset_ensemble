@@ -15,25 +15,26 @@ from sklearn.preprocessing import StandardScaler
 warnings.filterwarnings('ignore')
 
 for experiment in [
-#  'mushrooms',
 #  'ilpd',
 #  'banknote',
 #  'fourclass',
+#  'mushrooms',
 #  'svmguide3',
 #  'transfusion',
 #  'german_numer',
 #  'liver-disorders',
 #  'heart',
  'r2',
-#  'haberman',
-#  'svmguide1',
-#  'breastcancer',
-#  'australian',
-#  'diabetes',
-#  'mammographic',
-#  'ionosphere',
-#  'colon-cancer'
+ 'haberman',
+ 'svmguide1',
+ 'breastcancer',
+ 'australian',
+ 'diabetes',
+ 'mammographic',
+ 'ionosphere',
+ 'colon-cancer'
  ]:
+    
 # Experiment paths
 
     print(f'Experiment: {experiment}\n')
@@ -46,7 +47,7 @@ for experiment in [
 
     # hyperparameters gridsearch
     random_state = 1234
-    
+
     # Preprocessing
     scaler = StandardScaler()
     X = scaler.fit_transform(data.drop(columns=['y']))
@@ -66,7 +67,7 @@ for experiment in [
         ss_idx.append(ss_estimator.supportsubset)
 
     folds = list(zip(train_idx, test_idx, ss_idx))
-    
+
     grid_params = {
         'wrab': [True, False],
         'lam': [1, 3, 5],
@@ -75,9 +76,23 @@ for experiment in [
         'random_state': [random_state]
     }
 
-# modificar para calcular una única vez los support subsets y los 10 folds, comprobar que entra bien el parámetro active_set
+    # MOE-SVM
 
-    # MOESS-kNN 
+    ensemble = MOESS
+
+    ensemble_grid = GridSearch_moess(ensemble, grid_params, scoring=scaled_mcc, folds=folds, n_jobs=-1)
+
+    print('MOESS svm : \n')
+
+    ensemble_grid.fit(X, y)
+
+    print(f'params: {ensemble_grid.best_params_}, score: {ensemble_grid.best_score_}\n')
+
+    with open(f'results/{experiment}/MOESS_svm.p', 'wb') as fout:
+        pickle.dump(ensemble_grid, fout, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+    # MOESS-kNN
 
     kwargs = {'method':KNeighborsClassifier, 'params':{'n_neighbors' : list(range(1, 13, 2))}}
 
@@ -93,9 +108,9 @@ for experiment in [
 
     with open(f'results/{experiment}/MOESS_knn.p', 'wb') as fout:
         pickle.dump(ensemble_grid, fout, protocol=pickle.HIGHEST_PROTOCOL)
-        
 
-    # MOE-DT 
+
+    # MOE-DT
 
     kwargs = {'method':DecisionTreeClassifier, 'params':{'criterion' : {"gini", "entropy"}, 'max_depth' : list(range(1, 10, 1))}}
 
@@ -113,17 +128,3 @@ for experiment in [
         pickle.dump(ensemble_grid, fout, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-    # MOE-SVM 
-    
-    ensemble = MOESS
-
-    ensemble_grid = GridSearch_moess(ensemble, grid_params, scoring=scaled_mcc, folds=folds, n_jobs=-1, kwargs=kwargs)
-
-    print('MOESS svm : \n')
-
-    ensemble_grid.fit(X, y)
-
-    print(f'params: {ensemble_grid.best_params_}, score: {ensemble_grid.best_score_}\n')
-
-    with open(f'results/{experiment}/MOESS_svm.p', 'wb') as fout:
-        pickle.dump(ensemble_grid, fout, protocol=pickle.HIGHEST_PROTOCOL)

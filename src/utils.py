@@ -161,10 +161,16 @@ class GridSearch_moess():
         else:
             clf = self.method(**params, **self.kwargs)
 
+        ii = 0
         for train_index, test_index, ss_index in self.k_fold_splits:
+            
+            try:
+                clf.fit(X[train_index], y[train_index], hot_indexes=ss_index)
+            except Exception as e:
+                print(params, ii, e)
+                raise e
 
-            clf.fit(X[train_index], y[train_index], active_indexes=ss_index)
-
+            ii += 1
             scores.append(self.scoring(
                 y[test_index], clf.predict(X[test_index])))
 
